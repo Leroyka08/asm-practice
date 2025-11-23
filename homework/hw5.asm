@@ -1,108 +1,137 @@
-
 section .data
-    N       dq 10                        
-    MSG_IN  db "Vhidne chyslo (N): ", 0
-    LEN_IN  equ $ - MSG_IN
-    MSG_OUT db "Factorial (N!): ", 0
-    LEN_OUT equ $ - MSG_OUT
-    NEWLINE db 10
+    BORDER  equ '#'  
+    DOT     equ '#'   
+    SPACE   equ ' '  
+    CR      equ 13     
+    LF      equ 10      
 
 section .bss
-    NUM_BUFFER  resb 32                  
+    line_buffer:    resb 255 + 2   
+    height:         resb 1         
+    width:          resb 1      
 
 section .text
     global _start
 
 _start:
+    mov ah, 36
+    mov al, 18
 
-    mov     rax, 1          
-    mov     rdi, 1          
-    lea     rsi, [rel MSG_IN]
-    mov     rdx, LEN_IN
-    syscall
+    mov [width], ah    
+    mov [height], al   
 
+    call drawEnvelope
 
-    mov     rax, [rel N]
-    call    print_uint64
-    call    print_newline
+    ; выход из программы
+    mov eax, 1         
+    xor ebx, ebx        
+    int 0x80
 
-    mov     rax, [rel N]
-    call    factorial_rec   
+drawEnvelope:
+    push ebp           
+    mov ebp, esp
 
-    mov     rax, 1
-    mov     rdi, 1
-    lea     rsi, [rel MSG_OUT]
-    mov     rdx, LEN_OUT
-    syscall
+    call prepareLineBuffer  
 
-    call    print_uint64
-    call    print_newline
+    call printBorderLine
+    call printCenterLines   
+    call printBorderLine   
 
-    ; --- exit ---
-    mov     rax, 60
-    xor     rdi, rdi
-    syscall
-
-
-factorial_rec:
-    cmp     rax, 1
-    jle     .base_case
-
-    push    rax
-    dec     rax
-    call    factorial_rec
-    pop     rcx
-    mul     rcx
+    pop ebp           
     ret
 
-.base_case:
-    mov     rax, 1
+; инициализация буфера новой строкой
+prepareLineBuffer:
+    push eax
+    movzx eax, byte [width]   
+    mov ecx, eax
+    mov edi, line_buffer
+    xor eax, eax
+fill_space:
+    mov byte [edi], SPACE
+    inc edi
+    loop fill_space
+
+    ; добавить CR LF
+    mov byte [edi], CR
+    inc edi
+    mov byte [edi], LF
+
+    pop eax
     ret
 
-print_uint64:
-    push    rax
-    push    rcx
-    push    rdx
-    push    rsi
+printBorderLine:
+    push ecx
+    push eax
 
-    mov     rcx, 10
-    lea     rsi, [rel NUM_BUFFER + 31]   ; кінцевий байт буфера
+    movzx ecx, byte [width]   
+    xor eax, eax      
+fill_loop:
+    mov [line_buffer + eax], byte BORDER
+    inc eax
+    dec ecx
+    jnz fill_loop
 
-    cmp     rax, 0
-    jne     .convert_loop
+    call printLine    
 
-    dec     rsi
-    mov     byte [rsi], '0'
-    jmp     .print
-
-.convert_loop:
-    xor     rdx, rdx
-    div     rcx              ; rax = rax / 10, rdx = rax % 10
-    add     dl, '0'
-    dec     rsi
-    mov     [rsi], dl
-    test    rax, rax
-    jnz     .convert_loop
-
-.print:
-    lea     rdx, [rel NUM_BUFFER + 31]
-    sub     rdx, rsi        ; довжина рядка
-
-    mov     rax, 1          ; sys_write
-    mov     rdi, 1          ; stdout
-    ; rsi уже містить адресу початку рядка
-    syscall
-
-    pop     rsi
-    pop     rdx
-    pop     rcx
-    pop     rax
+    pop eax
+    pop ecx
     ret
 
-print_newline:
-    mov     rax, 1
-    mov     rdi, 1
-    lea     rsi, [rel NEWLINE]
-    mov     rdx, 1
-    syscall
+; печать центра конверта с точками
+printCenterLines:
+    push ebp            
+    mov ebp, esp
+    sub esp, 8          
+
+    mov dword [ebp-4], 0  ; счетчик смещения для DOT
+
+    xor eax, eax
+    
+    movzx eax, byte [width]
+    movzx ecx, byte [height]
+    sub ecx, 2
+    mov [ebp-8], ecx    ; количество центральных линий
+
+dot_loop:
+    cmp dword [ebp-8], 0
+    je end_dot_loop
+
+    mov eax, [ebp-4]
+    inc dword [ebp-4]
+
+    ; левая точка
+    mov edx, [ebp-4]
+    mov [line_buffer + edx], byte DOT
+
+    ; правая точка
+    movzx ebx, byte [width]
+    dec ebx
+    sub ebx, edx
+    mov [line_buffer + ebx], byte DOT
+
+    call printLine
+
+    mov [line_buffer + edx], byte SPACE
+    mov [line_buffer + ebx], byte SPACE
+
+    dec dword [ebp-8]
+    jmp dot_loop
+
+end_dot_loop:
+    mov esp, ebp      
+    pop ebp
+    ret
+
+printLine:
+    pusha              
+
+    mov eax, 4          ; sys_write
+    mov ebx, 1          ; stdout
+    mov ecx, line_buffer
+    movzx edx, byte [width]
+    add edx, 2          ; +CR LF
+    int 0x80
+
+    popa                
     ret
